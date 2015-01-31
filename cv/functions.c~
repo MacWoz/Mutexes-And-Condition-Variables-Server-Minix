@@ -1,0 +1,75 @@
+#include "inc.h"
+
+int do_lock (int mutex_id) {
+    int i;
+    bool used = false;
+    int position = -1;
+    int firstFreePosition = -1;
+    for (i=0;i<MAX_MUTEXES_NUMBER;++i) {
+        if ((! isUsed[i]) && (firstFreePosition == -1))
+            firstFreePosition = i;
+        if ((usedMutexes[i] == mutex_id) && (isUsed[i]))
+            used = true;
+            position = i;
+            break;
+        }
+    }
+    if (used) {
+        if (mutexOwners[position] == who_e) /** Chce jeszcze raz ten sam mutex */
+            return -1;
+
+        if (mutexQueue[position] == NULL)       /** Jak nie ma jeszcze kolejki */
+            mutexQueue[position] = createQueue(mutex_id);
+
+        enqueue(who_e, mutexQueue[position]);
+    }
+    else {
+        usedMutexes[firstFreePosition] = mutex_id;
+        isUsed[firstFreePosition] = true;
+        mutexOwners[firstFreePosition] = who_e;
+    }
+    return 0;
+}
+
+int do_unlock (int mutex_id) {
+    int i;
+    for (i=0;i<MAX_MUTEXES_NUMBER;++i) {
+        if ((usedMutexes[i] == mutex_id) && (isUsed[i])) {
+            if (mutexOwners[i] == who_e) {
+                if (mutexQueue[i] == NULL) {
+                    isUsed[i] = false;
+                }
+                else if (isEmpty(mutexQueue[i])) {
+                    isUsed[i] = false;
+                    destroyQueue(mutexQueue[i]);
+                    mutexQueue[i] = NULL;
+                }
+                else {  /** Ktoś czeka w kolejce */
+                    endpoint_t nextOwner = pop(mutexQueue[i]);
+                    if (isEmpty(mutexQueue[i])) {
+                        destroyQueue(mutexQueue[i]);
+                        mutexQueue[i] = NULL;
+                    }
+                    mutexOwners[i] = nextOwner;
+                    message mess;
+                    mess.type = 0;
+                    send(nextOwner, &mess);
+                }
+            }
+            else {
+                errno = EPERM;
+                return -1;
+            }
+            break;
+        }
+    }
+    return 0;
+}
+
+int do_wait (int cond_var_id, int mutex_id) {
+    return 1;
+}
+
+int do_broadcast (int cond_var_id) {
+    return 1;
+}

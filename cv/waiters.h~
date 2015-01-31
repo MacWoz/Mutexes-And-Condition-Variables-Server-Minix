@@ -1,0 +1,9 @@
+#include "inc.h"
+
+typedef struct waiters {
+    endpoint_t processes[256];
+    int cond_var_id;
+    int size = 0;
+} waiters;
+
+waiters* createWaiters(int);
