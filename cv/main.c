@@ -13,13 +13,14 @@ int do_lock(int);
 int do_unlock(int);
 int do_wait(int, int);
 int do_broadcast(int);
+void handle_vm_notify(void);
 
 int usedMutexes[1024] = {0};
 bool isUsed[1024] = {false};
 endpoint_t mutexOwners[1024] = {0};
-queue* mutexQueue[1024] = {NULL};
+queue* mutexQueue[1024] = {0};
 
-waiters* waitersTable[1024] = {NULL};
+waiters* waitersTable[1024] = {0};
 bool isWaiterUsed[1024] = {false};
 
 /* SEF functions and variables. */
@@ -38,11 +39,20 @@ int main(int argc, char* argv[])
         if ((r = sef_receive(ANY, &m)) != OK) {
             printf("Communication failed!\n");
         }
-        else {
-            printf ("Success!\n");
-        }
 		who_e = m.m_source;
 		call_type = m.m_type;
+
+		if (call_type & NOTIFY_MESSAGE) {
+            switch (who_e) {
+                case VM_PROC_NR:
+                    handle_vm_notify();
+                    break;
+                default:
+                    printf("Ignoring notify() from %d\n.", who_e)
+            }
+            continue;
+		}
+
 		int mutex_id;
 		int cvar_id;
 		int result;
@@ -60,15 +70,15 @@ int main(int argc, char* argv[])
                 m.m_type = result;
                 break;
 
-            case WAIT :
+            case CS_WAIT :
                 mutex_id = m.m1_i1;
                 cvar_id = m.m1_i2;
                 result = do_wait(cvar_id, mutex_id);
                 m.m_type = result;
                 break;
 
-            case BROADCAST :
-                cvar_id = m.m1_i2;
+            case CS_BROADCAST :
+                cvar_id = m.m1_i1;
                 result = do_broadcast(cvar_id);
                 m.m_type = result;
                 break;
@@ -78,6 +88,7 @@ int main(int argc, char* argv[])
                 m.m_type = -EINVAL;
                 result = EINVAL;
         }
+        printf("OK, server got result %d\n", result);
         if (result != EDONTREPLY) {
             int endRes = send(who_e, &m);
             printf ("OK, sent reply, result %d\n", endRes);
@@ -125,7 +136,6 @@ int do_lock (int mutex_id) {
     if (used) {
         if (mutexOwners[position] == who_e) /** Chce jeszcze raz ten sam mutex */
         {
-            printf("Ten sam mutex, EPERM!\n");
             return -EPERM;
         }
 
@@ -135,6 +145,8 @@ int do_lock (int mutex_id) {
         }
         printf("Enqueued process %d.\n", who_e);
         enqueue(who_e, mutexQueue[position]);
+        int vm = vm_watch_exit(m.m_source);
+        printf("OK, watch dla %d - result %d\n", who_e, vm);
         return EDONTREPLY;
     }
     else {
@@ -142,6 +154,8 @@ int do_lock (int mutex_id) {
         usedMutexes[firstFreePosition] = mutex_id;
         isUsed[firstFreePosition] = true;
         mutexOwners[firstFreePosition] = who_e;
+        int vm = vm_watch_exit(m.m_source);
+        printf("OK, watch dla %d - result %d\n", who_e, vm);
         return OK;
     }
 }
@@ -205,13 +219,14 @@ int do_wait (int cvar_id, int mutex_id) {
         else if ((!isWaiterUsed[i]) && (firstFreePosition == -1))
             firstFreePosition = i;
 
-        if (waitersTable[i]->cond_var_id == cvar_id) {
-            addToWaiters(waitersTable[i], mutex_owner);
+        if ((isWaiterUsed[i]) && (waitersTable[i] != NULL) && (waitersTable[i]->cond_var_id == cvar_id)) {
+            addToWaiters(waitersTable[i], mutex_owner, mutex_id);
             return EDONTREPLY;
         }
     }
     waitersTable[firstFreePosition] = createWaiters(cvar_id);
-    addToWaiters(waitersTable[firstFreePosition], mutex_owner);
+    isWaiterUsed[firstFreePosition] = true;
+    addToWaiters(waitersTable[firstFreePosition], mutex_owner, mutex_id);
     return EDONTREPLY;
 }
 
@@ -223,13 +238,25 @@ int do_broadcast (int cvar_id) {
             int j;
             for (j=0;j<waitersTable[i]->size;++j) {
                 who_e = waitersTable[i]->processes[j];
-                do_lock(who_e);
+                int lockResult = do_lock(waitersTable[i]->owned_mutexes[j]);
+                printf("Locking %d on mutex %d, result %d\n", who_e, waitersTable[i]->owned_mutexes[j], lockResult);
+                if (lockResult != EDONTREPLY) {
+                    printf("Sent response from do_broadcast.\n");
+                    message mess;
+                    mess.m_type = 0;
+                    send(who_e, &mess);
+                }
             }
             who_e = caller;
             free(waitersTable[i]);
             waitersTable[i] = NULL;
+            isWaiterUsed[i] = false;
             break;
         }
     }
     return OK;
+}
+
+void handle_vm_notify() {
+
 }

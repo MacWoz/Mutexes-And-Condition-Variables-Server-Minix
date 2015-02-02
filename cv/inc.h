@@ -7,8 +7,8 @@
 
 #define MUTEX_LOCK      1
 #define MUTEX_UNLOCK    2
-#define WAIT            3
-#define BROADCAST       4
+#define CS_WAIT         3
+#define CS_BROADCAST    4
 
 #define MAX_MUTEXES_NUMBER 1024
 

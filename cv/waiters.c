@@ -8,7 +8,8 @@ waiters* createWaiters(int cvar_id) {
     return w;
 }
 
-void addToWaiters(waiters* w, endpoint_t proc) {
+void addToWaiters(waiters* w, endpoint_t proc, int owned_mutex) {
     (*w).processes[w->size] = proc;
+    (*w).owned_mutexes[w->size] = owned_mutex;
     w->size += 1;
 }
