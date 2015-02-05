@@ -20,6 +20,8 @@ void enqueue(endpoint_t proc_nr, queue* Q);
 
 int pop(queue* Q);
 
+void remove_from_queue(queue* Q, Node* node);
+
 int isEmpty(queue* Q);
 
 void destroyQueue(queue* Q);

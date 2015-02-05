@@ -30,6 +30,17 @@ int pop(queue* Q) {
     return value;
 }
 
+void remove_from_queue(queue* Q, Node* node) {
+    Node* n;
+    for (n = Q->head;n != Q->tail;n = n->next) {
+        if (n->next == node) {
+            n->next = node->next;
+            free(node);
+            break;
+        }
+    }
+}
+
 int isEmpty(queue* Q) {
     return Q->head->next == Q->tail;
 }

@@ -5,6 +5,9 @@ waiters* createWaiters(int cvar_id) {
     waiters* w = malloc(sizeof(waiters));
     w->cond_var_id = cvar_id;
     w->size = 0;
+    int i;
+    for (i=0;i<MAX_CVS_NUMBER;++i)
+    w->processes[i] = -1;
     return w;
 }
 

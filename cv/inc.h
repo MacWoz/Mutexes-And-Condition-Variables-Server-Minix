@@ -5,12 +5,15 @@
 #define _MINIX        	1
 #define _SYSTEM		    1
 
-#define MUTEX_LOCK      1
-#define MUTEX_UNLOCK    2
-#define CS_WAIT         3
-#define CS_BROADCAST    4
+#define MUTEX_LOCK      	1
+#define MUTEX_UNLOCK    	2
+#define CS_WAIT         	3
+#define CS_BROADCAST    	4
+#define PM_SIGNAL_MESSAGE 	5
+#define PROCESS_TERMINATED  6
 
-#define MAX_MUTEXES_NUMBER 1024
+#define MAX_MUTEXES_NUMBER  1024
+#define MAX_CVS_NUMBER      256
 
 #include <minix/callnr.h>
 #include <minix/com.h>
