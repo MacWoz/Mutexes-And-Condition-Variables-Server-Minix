@@ -15,8 +15,10 @@ int cs_lock(int mutex_id) {
 	m.m1_i1 = mutex_id;
 	int result;
 	while ((result = _syscall(CV, 1, &m)) == -1) {
-                if (errno == EINTR)
+                if (errno == EINTR) {
+                    m.m1_i1 = mutex_id;
                     continue;
+                }
 
                 else return -1;
 	}
@@ -35,14 +37,14 @@ int cs_wait(int cond_var_id, int mutex_id) {
 	m.m1_i2 = cond_var_id;
 	int result = _syscall(CV, 3, &m);
 	if (result == -1) {
-        if (errno == EINTR) {
-            int lockRes = cs_lock(mutex_id);
-            if (lockRes == -1)
-                return -1;
-            else
-                return 0;
-        }
-        else return -1;
+		if (errno == EINTR) {
+		    int lockRes = cs_lock(mutex_id);
+		    if (lockRes == -1)
+		        return -1;
+		    else
+		        return 0;
+		}
+        	else return -1;
 	}
 	return result;
 }

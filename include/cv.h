@@ -2,7 +2,6 @@
 #define _CV_H_
 
 #include <lib.h>
-#include <minix/rs.h>
 #include <minix/endpoint.h>
 #include <stdio.h>
 

@@ -39,7 +39,8 @@ int main(int argc, char* argv[])
 	while (true) {
         int r;
         if ((r = sef_receive(ANY, &m)) != OK) {
-            printf("Communication failed!\n");
+            printf("CV: Communication receive failed!\n");
+            continue;
         }
 		who_e = m.m_source;
 		call_type = m.m_type;
@@ -75,13 +76,12 @@ int main(int argc, char* argv[])
                 break;
 
             case PM_SIGNAL_MESSAGE :
-                ///if (m.m_source != PM_PROC_NR) break;
-                proc = m.m1_i1;
+                proc = m.PM_PROC;
                 send_eintr(proc);
                 result = EDONTREPLY;
                 break;
             case PROCESS_TERMINATED:
-                proc = m.m1_i1;
+                proc = m.PM_PROC;
                 endpoint_t old = who_e;
                 who_e = proc;
                 remove_proc(proc);
@@ -90,26 +90,29 @@ int main(int argc, char* argv[])
                 break;
             default:
                 printf("CV warning: got illegal request from %d\n", who_e);
-                m.m_type = -EINVAL;
+                m.m_type = EINVAL;
                 result = EINVAL;
         }
         if (result != EDONTREPLY) {
             int endRes = send(who_e, &m);
+            if (endRes != OK) {
+                printf("CV warning: send to %d failed!\n", who_e);
+            }
         }
 	}
-	/* Never gets here */
+	/** Never gets here */
 	return -1;
 }
 
 static void sef_local_startup()
 {
-    /* Register init callbacks. */
+    /** Register init callbacks. */
     sef_setcb_init_fresh(sef_cb_init_fresh);
     sef_setcb_init_restart(sef_cb_init_fresh);
 
-    /* Register signal callbacks. */
+    /** Register signal callbacks. */
     sef_setcb_signal_handler(sef_cb_signal_handler);
-    /* Let SEF perform startup. */
+    /** Let SEF perform startup. */
     sef_startup();
 }
 
@@ -121,7 +124,6 @@ static int sef_cb_init_fresh(int UNUSED(type), sef_init_info_t *UNUSED(info))
 static void sef_cb_signal_handler(int signo) { }
 
 int do_lock (int mutex_id) {
-    printf("Locking mutex %d\n", mutex_id);
     int i;
     bool used = false;
     int position = -1;
@@ -137,18 +139,15 @@ int do_lock (int mutex_id) {
     }
     if (used) {
         if (mutexOwners[position] == who_e) /** Chce jeszcze raz ten sam mutex */
-        {
-            return -EPERM;
-        }
+            return EPERM;
 
-        if (mutexQueue[position] == NULL) {            /** Jak nie ma jeszcze kolejki */
+        if (mutexQueue[position] == NULL)          /** Jak nie ma jeszcze kolejki */
             mutexQueue[position] = createQueue(mutex_id);
-        }
+
         enqueue(who_e, mutexQueue[position]);
         return EDONTREPLY;
     }
     else {
-        printf("Mutex %d not used, placed at position%d\n", mutex_id, firstFreePosition);
         usedMutexes[firstFreePosition] = mutex_id;
         isUsed[firstFreePosition] = true;
         mutexOwners[firstFreePosition] = who_e;
@@ -157,15 +156,16 @@ int do_lock (int mutex_id) {
 }
 
 int do_unlock (int mutex_id) {
-    printf("Unlocking mutex %d\n", mutex_id);
     int i;
+    int check = 0;
     for (i=0;i<MAX_MUTEXES_NUMBER;++i) {
-        if ((usedMutexes[i] == mutex_id) && (isUsed[i])) {
-            if (mutexOwners[i] == who_e) {
-                if (mutexQueue[i] == NULL) {
+        if ((usedMutexes[i] == mutex_id) && (isUsed[i])) { /** znaleziomo mutex, mutex może wystąpić maksymalnie raz w całej tablicy */
+            if (mutexOwners[i] == who_e) { /** Proces jest właścicelem mutexu */
+                check = 1;
+                if (mutexQueue[i] == NULL) { /** nie ma kolejki */
                     isUsed[i] = false;
                 }
-                else if (isEmpty(mutexQueue[i])) {
+                else if (isEmpty(mutexQueue[i])) { /** nie ma nikogo w kolejce */
                     isUsed[i] = false;
                     destroyQueue(mutexQueue[i]);
                     mutexQueue[i] = NULL;
@@ -179,16 +179,19 @@ int do_unlock (int mutex_id) {
                     mutexOwners[i] = nextOwner;
                     message mess;
                     mess.m_type = 0;
-                    send(nextOwner, &mess);
+                    int sendRes = send(nextOwner, &mess);
+                    if (sendRes != OK)
+                        printf("CV warning: send to %d failed!\n", who_e);
                 }
             }
-            else
-                return -EPERM;
+            else /** Proces nie jest właścicielem mutexu*/
+                return EPERM;
 
             break;
         }
     }
-    return OK;
+    if (check) return OK;
+    else return EPERM;
 }
 
 int do_wait (int cvar_id, int mutex_id) {
@@ -201,18 +204,19 @@ int do_wait (int cvar_id, int mutex_id) {
             break;
         }
     }
-    if (!owner)
+    if (!owner){ /** Proces nie jest właścicielem mutexu */
         return -EINVAL;
+    }
 
-    do_unlock(mutex_id);
+    do_unlock(mutex_id); /** zwalniamy mutex */
     int firstFreePosition = -1;
     for (i=0;i<MAX_CVS_NUMBER;++i) {
-        if ((waitersTable[i] == NULL) && (firstFreePosition == -1))
+        if ((waitersTable[i] == NULL) && (firstFreePosition == -1)) /** Pierwsze wolne miejsce w tablicy Cond. Variables */
             firstFreePosition = i;
-        else if ((!isWaiterUsed[i]) && (firstFreePosition == -1))
+        else if ((! isWaiterUsed[i]) && (firstFreePosition == -1))
             firstFreePosition = i;
 
-        if ((isWaiterUsed[i]) && (waitersTable[i] != NULL) && (waitersTable[i]->cond_var_id == cvar_id)) {
+        if ((isWaiterUsed[i]) && (waitersTable[i] != NULL) && (waitersTable[i]->cond_var_id == cvar_id)) { /** Już istnieje zbiór czekających na dane zdarzenie, dokładamy */
             addToWaiters(waitersTable[i], mutex_owner, mutex_id);
             return EDONTREPLY;
         }
@@ -226,19 +230,18 @@ int do_wait (int cvar_id, int mutex_id) {
 int do_broadcast (int cvar_id) {
     int i;
     endpoint_t caller = who_e;
-    for (i=0;i<MAX_MUTEXES_NUMBER;++i) {
-        if ((isWaiterUsed[i]) && (waitersTable[i] != NULL) && (waitersTable[i]->cond_var_id == cvar_id)) {
+    for (i=0;i<MAX_CVS_NUMBER;++i) {
+        if ((isWaiterUsed[i]) && (waitersTable[i] != NULL) && (waitersTable[i]->cond_var_id == cvar_id)) { /** Mamy czekających na zdarzenie, ogłaszamy */
             int j;
             for (j=0;j<waitersTable[i]->size;++j) {
                 who_e = waitersTable[i]->processes[j];
-                if (who_e == -1)
-                    continue;
-
                 int lockResult = do_lock(waitersTable[i]->owned_mutexes[j]);
                 if (lockResult != EDONTREPLY) {
                     message mess;
                     mess.m_type = 0;
-                    send(who_e, &mess);
+                    int sendRes = send(who_e, &mess);
+                    if (sendRes != OK)
+                        printf("CV warning: send to %d failed!\n", who_e);
                 }
             }
             who_e = caller;
@@ -260,15 +263,16 @@ void send_eintr(endpoint_t proc) {
                 if (node->proc_nr == proc) {
                     message mess;
                     mess.m_type = EINTR;
-                    send(proc, &mess);
+                    int sendRes = send(proc, &mess);
+                    if (sendRes != OK)
+                        printf("CV warning: send to %d failed!\n", who_e);
+
                     remove_from_queue(mutexQueue[i], node);
-                    printf("sent EINTR to %d\n", proc);
                     if (isEmpty(mutexQueue[i])) {
                         free(mutexQueue[i]);
                         mutexQueue[i] = NULL;
-                        printf("removed queue\n");
                     }
-                    return ;
+                    return ; /** Kończymy, bo proces może wystąpić TYLKO RAZ i TYLKO W JEDNEJ KOLEJCE po mutex. Wtedy też nie bedzie czekał na żadne zdarzenie. */
                 }
             }
         }
@@ -278,55 +282,75 @@ void send_eintr(endpoint_t proc) {
         if((waitersTable[i] != NULL) && (isWaiterUsed[i])) {
             int j;
             for (j=0;j<waitersTable[i]->size;++j) {
-                if (waitersTable[i]->processes[j] == proc) {
+                if (waitersTable[i]->processes[j] == proc) { /** Proces czeka tutaj, może czekać TYLKO na JEDNO zdarzenie i TYLKO RAZ w tablicy. */
                     message mess;
                     mess.m_type = EINTR;
-                    send(proc, &mess);
-                    waitersTable[i]->processes[j] = -1;
-                    if (waitersTable[i]->size == 1) {
+                    int sendRes = send(proc, &mess);
+                    if (sendRes != OK)
+                        printf("CV warning: send to %d failed!\n", who_e);
+
+                    if (waitersTable[i]->size == 1) { /** Czyli już nikt nie czeka na to zdarzenie. */
                         free (waitersTable[i]);
                         isWaiterUsed[i] = false;
                         waitersTable[i] = NULL;
+                        break;
                     }
+                    else {
+                        int k;
+                        for (k=j+1;k<waitersTable[i]->size;++k) {
+                            waitersTable[i]->processes[k-1] = waitersTable[i]->processes[k];
+                            waitersTable[i]->owned_mutexes[k-1] = waitersTable[i]->owned_mutexes[k];
+                        }
+                        waitersTable[i]->size -= 1;
+                    }
+                    break;
                 }
             }
         }
     }
 }
 
-void remove_proc(endpoint_t proc) {
+void remove_proc(endpoint_t proc) { /** Usuwanie procesu po jego zakończeniu */
     int i;
     for (i=0;i<MAX_MUTEXES_NUMBER;++i) {
-        if (isUsed[i] && (mutexOwners[i] == proc)) {
+        if (isUsed[i] && (mutexOwners[i] == proc)) { /** Odblokowujemy wszystkie mutexy zajęte przez proces proc */
             do_unlock(usedMutexes[i]);
         }
-        if ((mutexQueue[i] != NULL) && (! isEmpty(mutexQueue[i]))) {
+        if ((mutexQueue[i] != NULL) && (! isEmpty(mutexQueue[i]))) { /** Usuwamy go z kolejki jeśli na któryś czeka */
             Node* node;
             for (node = mutexQueue[i]->head->next;node != mutexQueue[i]->tail;node = node->next) {
                 if (node->proc_nr == proc) {
                     remove_from_queue(mutexQueue[i], node);
-                    printf("Removed from queue proc %d\n", proc);
                     if (isEmpty(mutexQueue[i])) {
                         free(mutexQueue[i]);
                         mutexQueue[i] = NULL;
-                        printf("removed queue\n");
                     }
+                    break;
                 }
             }
         }
     }
 
     for (i=0;i<MAX_CVS_NUMBER;++i) {
-        if((waitersTable[i] != NULL) && (isWaiterUsed[i])) {
+        if((waitersTable[i] != NULL) && (isWaiterUsed[i])) { /** Jesli czeka na zdarzenie to go usuwamy. */
             int j;
             for (j=0;j<waitersTable[i]->size;++j) {
                 if (waitersTable[i]->processes[j] == proc) {
-                    waitersTable[i]->processes[j] = -1;
-                    if (waitersTable[i]->size == 1) {
+                    if (waitersTable[i]->size == 1) { /** już nikt nie czeka, usuwamy */
                         free (waitersTable[i]);
                         isWaiterUsed[i] = false;
                         waitersTable[i] = NULL;
+                        break;
                     }
+                    else {
+                        int k;
+                        for (k=j+1;k<waitersTable[i]->size;++k) {
+                            waitersTable[i]->processes[k-1] = waitersTable[i]->processes[k];
+                            waitersTable[i]->owned_mutexes[k-1] = waitersTable[i]->owned_mutexes[k];
+                        }
+                        waitersTable[i]->size -= 1;
+                    }
+                    break;
                 }
             }
         }

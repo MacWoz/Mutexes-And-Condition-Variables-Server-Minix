@@ -7,7 +7,8 @@ waiters* createWaiters(int cvar_id) {
     w->size = 0;
     int i;
     for (i=0;i<MAX_CVS_NUMBER;++i)
-    w->processes[i] = -1;
+        w->processes[i] = -1;
+
     return w;
 }
 
